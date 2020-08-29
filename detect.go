@@ -52,33 +52,33 @@ func Detect(src string, pwd string, ds []Detector) (string, error) {
 		return src, nil
 	}
 
-	// Special case for when the 'git::' forcing token is used with a filepath
-	// (which may be either absolute or relative). If relative, it MUST begin
-	// with './' or '../', or the Windows equivalent).
-	//
-	// This needs to be done here because our Detector interface does not
-	// provide a way for us to communicate the forcing token value to the
-	// implementation; GitDetector.Detect(...) cannot assume any filepath it
-	// sees (in its 'src' param) as intended for Git without also knowing that
-	// the forcing token was specified. The forcing token explicitly tells us
-	// that the filepath is intended to be interpreted as the file system path
-	// to a Git repository.
-	//
-	if getForce == "git" {
-		rslt, ok, err := detectGitForceFilepath(getSrc, pwd, getForce)
-		if err != nil {
-			return "", err
-		}
-		if ok {
-			// 'git::' forced on a filepath was detected
-			rslt, err = handleDetected(rslt, getForce, subDir)
-			if err != nil {
-				return "", err
-			}
+	// // Special case for when the 'git::' forcing token is used with a filepath
+	// // (which may be either absolute or relative). If relative, it MUST begin
+	// // with './' or '../', or the Windows equivalent).
+	// //
+	// // This needs to be done here because our Detector interface does not
+	// // provide a way for us to communicate the forcing token value to the
+	// // implementation; GitDetector.Detect(...) cannot assume any filepath it
+	// // sees (in its 'src' param) as intended for Git without also knowing that
+	// // the forcing token was specified. The forcing token explicitly tells us
+	// // that the filepath is intended to be interpreted as the file system path
+	// // to a Git repository.
+	// //
+	// if getForce == "git" {
+	// 	rslt, ok, err := detectGitForceFilepath(getSrc, pwd, getForce)
+	// 	if err != nil {
+	// 		return "", err
+	// 	}
+	// 	if ok {
+	// 		// 'git::' forced on a filepath was detected
+	// 		rslt, err = handleDetected(rslt, getForce, subDir)
+	// 		if err != nil {
+	// 			return "", err
+	// 		}
 
-			return rslt, nil
-		}
-	}
+	// 		return rslt, nil
+	// 	}
+	// }
 
 	for _, d := range ds {
 		result, ok, err := d.Detect(getSrc, pwd)
