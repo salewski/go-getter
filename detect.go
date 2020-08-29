@@ -2,7 +2,6 @@ package getter
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/hashicorp/go-getter/helper/url"
 )
@@ -98,45 +97,4 @@ func Detect(src string, pwd string, ds []Detector) (string, error) {
 	}
 
 	return "", fmt.Errorf("invalid source string: %s", src)
-}
-
-func handleDetected(detectedResult, srcGetForce, subDir string) (string, error) {
-	var detectForce string
-	detectForce, result := getForcedGetter(detectedResult)
-	result, detectSubdir := SourceDirSubdir(result)
-
-	// If we have a subdir from the detection, then prepend it to our
-	// requested subdir.
-	if detectSubdir != "" {
-		if subDir != "" {
-			subDir = filepath.Join(detectSubdir, subDir)
-		} else {
-			subDir = detectSubdir
-		}
-	}
-
-	if subDir != "" {
-		u, err := url.Parse(result)
-		if err != nil {
-			return "", fmt.Errorf("Error parsing URL: %s", err)
-		}
-		u.Path += "//" + subDir
-
-		// a subdir may contain wildcards, but in order to support them we
-		// have to ensure the path isn't escaped.
-		u.RawPath = u.Path
-
-		result = u.String()
-	}
-
-	// Preserve the forced getter if it exists. We try to use the
-	// original set force first, followed by any force set by the
-	// detector.
-	if srcGetForce != "" {
-		result = fmt.Sprintf("%s::%s", srcGetForce, result)
-	} else if detectForce != "" {
-		result = fmt.Sprintf("%s::%s", detectForce, result)
-	}
-
-	return result, nil
 }
