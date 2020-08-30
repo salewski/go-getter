@@ -2,45 +2,118 @@ package getter
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/hashicorp/go-getter/helper/url"
 )
 
-// Detector defines the interface that an invalid URL or a URL with a blank
-// scheme is passed through in order to determine if its shorthand for
-// something else well-known.
-type Detector interface {
-	// Detect will detect whether the string matches a known pattern to
-	// turn it into a proper URL.
-	Detect(string, string) (string, bool, error)
+// CtxDetector (read: "Contextual Detector"), like its Detector predecessor,
+// defines an interface that an invalid URL or a URL with a blank scheme can
+// be passed through in order to determine if its shorthand for something else
+// well-known.
+//
+// In addition to the capabilities provided by Detector, a CtxDetector allows
+// the caller to provide more information about the context in which it is
+// being invoked, which allows for some types of useful detections and
+// transformations that were not previously possible.
+//
+type CtxDetector interface {
+	// CtxDetect will detect whether the string matches a known pattern to
+	// turn it into a proper URL
+	//
+	// FIXME: Providing 'ctxSubDir' in order make all context data available
+	//        to CtxDetector implementation(s). Does this help avoid blind
+	//        spots in the CtxDetector's? Or does it just add unnecessary
+	//        complexity?
+	//
+	// The 'ctxSubDir' value, if non-empty, will be the '//some/subdir' value
+	// already parsed out of 'src' (as by SourceDirSubdir(...)). It is
+	// provided to the CtxDetector impl. only for contextual awareness, which
+	// conceivably could inform its decision-making process. It should not be
+	// incorporated into the result returned by the CtxDetector impl.
+	//
+	// Protocol: Where they need to be resolved, relative filepath values in
+	//           'src' will be resolved relative to 'pwd', unless
+	//           'srcResolveFrom' is non-empty; then they will be resolved
+	//           relative to 'srcResolveFrom'.
+	//
+	//           Note that some CtxDetector impls. (FileCtxDetector,
+	//           GitCtxDetector) can only produce meaningful results in some
+	//           circumstances if they have an absolute directory to resolve
+	//           to. For best results, when 'srcResolveFrom' is non-empty,
+	//           provide an absolute filepath.
+	//
+	//           The CtxDetect interface itself does not require that either
+	//           'pwd' or 'srcResolveFrom' be absolute filepaths, but that
+	//           might be required by a particular CtxDetector implementation.
+	//           Know that RFC-compliant use of 'file://' URIs (which some
+	//           CtxDetector impls. emit) permit only absolute filepaths, and
+	//           tools (such as Git) expect this. Providing relative filepaths
+	//           for 'pwd' and/or 'srcResolveFrom' may result in the
+	//           generation of non-legit 'file://' URIs with relative paths in
+	//           them, and CtxDetector implementations are permitted to reject
+	//           them with an error if it requires an absolute path.
+	//
+	CtxDetect(src, pwd, forceToken, ctxSubDir, srcResolveFrom string) (string, bool, error)
 }
 
-// Detectors is the list of detectors that are tried on an invalid URL.
+// ContextualDetectors is the list of detectors that are tried on an invalid URL.
 // This is also the order they're tried (index 0 is first).
-var Detectors []Detector
+var ContextualDetectors []CtxDetector
 
 func init() {
-	Detectors = []Detector{
-		new(GitHubDetector),
-		new(GitDetector),
-		new(BitBucketDetector),
-		new(S3Detector),
-		new(GCSDetector),
-		new(FileDetector),
+	ContextualDetectors = []CtxDetector{
+		// new(GitHubCtxDetector),
+		new(GitCtxDetector),
+		// new(BitBucketCtxDetector),
+		// new(S3CtxDetector),
+		// new(GCSCtxDetector),
+		// new(FileCtxDetector),
 	}
 }
 
-// Detect turns a source string into another source string if it is
+// CtxDetect turns a source string into another source string if it is
 // detected to be of a known pattern.
 //
-// The third parameter should be the list of detectors to use in the
-// order to try them. If you don't want to configure this, just use
-// the global Detectors variable.
+// An empty-string value provided for 'pwd' is interpretted as "not
+// provided". Likewise for 'srcResolveFrom'.
+//
+// The (optional) 'srcResolveFrom' parameter allows the caller to provide a
+// directory from which any reletive filepath in 'src' should be resolved,
+// instead of relative to 'pwd'. This supports those use cases (e.g.,
+// Terraform modules with relative 'source' filepaths) where the caller
+// context for path resolution may be different than the pwd. For best result,
+// the provided value should be an absolute filepath. If unneeded, use specify
+// the empty string.
+//
+// The 'cds' []CtxDetector parameter should be the list of detectors to use in
+// the order to try them. If you don't want to configure this, just use the
+// global ContextualDetectors variable.
 //
 // This is safe to be called with an already valid source string: Detect
 // will just return it.
-func Detect(src string, pwd string, ds []Detector) (string, error) {
+//
+func CtxDetect(src, pwd, srcResolveFrom string, cds []CtxDetector) (string, error) {
+	//
+	// Design note: We considered accepting *string rather than string for
+	//              'pwd' and 'srcResolveFrom' params, as that would give us a
+	//              better way to distinguish between "not provided" and
+	//              "provided, but empty". We avoided doing so, however, for
+	//              two reasons:
+	//
+	//              1. Because we are providing an evolutionary step away from
+	//                 Detect(...), we want to make it as easy as possible to
+	//                 migrate existing code. It is presumably easier for
+	//                 current users of the Detect API to migrate to this one
+	//                 by adding an extra string param (for 'srcResolveFrom')
+	//                 than to change the types of the param they are passing
+	//                 for 'pwd' at all call sites.
+	//
+	//              2. In real-world use cases of this lib, having an empty
+	//                 string as the value against which to resolve a filepath
+	//                 would (probably) be non-sensible on all OS's. That is,
+	//                 we are safe in our context interpretting the empty
+	//                 string as meaning "not provided".
+
 	getForce, getSrc := getForcedGetter(src)
 
 	// Separate out the subdir if there is one, we don't pass that to detect
@@ -52,36 +125,8 @@ func Detect(src string, pwd string, ds []Detector) (string, error) {
 		return src, nil
 	}
 
-	// // Special case for when the 'git::' forcing token is used with a filepath
-	// // (which may be either absolute or relative). If relative, it MUST begin
-	// // with './' or '../', or the Windows equivalent).
-	// //
-	// // This needs to be done here because our Detector interface does not
-	// // provide a way for us to communicate the forcing token value to the
-	// // implementation; GitDetector.Detect(...) cannot assume any filepath it
-	// // sees (in its 'src' param) as intended for Git without also knowing that
-	// // the forcing token was specified. The forcing token explicitly tells us
-	// // that the filepath is intended to be interpreted as the file system path
-	// // to a Git repository.
-	// //
-	// if getForce == "git" {
-	// 	rslt, ok, err := detectGitForceFilepath(getSrc, pwd, getForce)
-	// 	if err != nil {
-	// 		return "", err
-	// 	}
-	// 	if ok {
-	// 		// 'git::' forced on a filepath was detected
-	// 		rslt, err = handleDetected(rslt, getForce, subDir)
-	// 		if err != nil {
-	// 			return "", err
-	// 		}
-
-	// 		return rslt, nil
-	// 	}
-	// }
-
-	for _, d := range ds {
-		result, ok, err := d.Detect(getSrc, pwd)
+	for _, d := range cds {
+		result, ok, err := d.CtxDetect(getSrc, pwd, getForce, subDir, srcResolveFrom)
 		if err != nil {
 			return "", err
 		}
@@ -98,45 +143,4 @@ func Detect(src string, pwd string, ds []Detector) (string, error) {
 	}
 
 	return "", fmt.Errorf("invalid source string: %s", src)
-}
-
-func handleDetected(detectedResult, srcGetForce, subDir string) (string, error) {
-	var detectForce string
-	detectForce, result := getForcedGetter(detectedResult)
-	result, detectSubdir := SourceDirSubdir(result)
-
-	// If we have a subdir from the detection, then prepend it to our
-	// requested subdir.
-	if detectSubdir != "" {
-		if subDir != "" {
-			subDir = filepath.Join(detectSubdir, subDir)
-		} else {
-			subDir = detectSubdir
-		}
-	}
-
-	if subDir != "" {
-		u, err := url.Parse(result)
-		if err != nil {
-			return "", fmt.Errorf("Error parsing URL: %s", err)
-		}
-		u.Path += "//" + subDir
-
-		// a subdir may contain wildcards, but in order to support them we
-		// have to ensure the path isn't escaped.
-		u.RawPath = u.Path
-
-		result = u.String()
-	}
-
-	// Preserve the forced getter if it exists. We try to use the
-	// original set force first, followed by any force set by the
-	// detector.
-	if srcGetForce != "" {
-		result = fmt.Sprintf("%s::%s", srcGetForce, result)
-	} else if detectForce != "" {
-		result = fmt.Sprintf("%s::%s", detectForce, result)
-	}
-
-	return result, nil
 }
