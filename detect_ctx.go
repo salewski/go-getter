@@ -104,12 +104,12 @@ var ContextualDetectors []CtxDetector
 
 func init() {
 	ContextualDetectors = []CtxDetector{
-		// new(GitHubCtxDetector),
-		// new(GitCtxDetector),
-		// new(BitBucketCtxDetector),
-		// new(S3CtxDetector),
-		// new(GCSCtxDetector),
-		// new(FileCtxDetector),
+		new(GitHubCtxDetector),
+		new(GitCtxDetector),
+		new(BitBucketCtxDetector),
+		new(S3CtxDetector),
+		new(GCSCtxDetector),
+		new(FileCtxDetector),
 	}
 }
 
